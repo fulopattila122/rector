@@ -13,21 +13,6 @@ final class RenameSubKeyYamlRector implements YamlRectorInterface
     private $pathsToNewKeys = [];
 
     /**
-     * @var string|null
-     */
-    private $activePathPattern;
-
-    /**
-     * @var string[]
-     */
-    private $activePathSteps = [];
-
-    /**
-     * @var string|null
-     */
-    private $activeNewKey;
-
-    /**
      * @param string[] $pathsToNewKeys
      */
     public function __construct(array $pathsToNewKeys)
@@ -37,18 +22,11 @@ final class RenameSubKeyYamlRector implements YamlRectorInterface
 
     public function isCandidate(string $content): bool
     {
-        $this->activePathPattern = null;
-        $this->activePathSteps = [];
-        $this->activeNewKey = null;
-
         foreach ($this->pathsToNewKeys as $path => $newKey) {
             $pathSteps = Strings::split($path, '#[\s+]?>[\s+]?#');
             $pathPattern = $this->createPattern($pathSteps);
 
             if ((bool) Strings::match($content, $pathPattern)) {
-                $this->activePathSteps = $pathSteps;
-                $this->activePathPattern = $pathPattern;
-                $this->activeNewKey = $newKey;
                 return true;
             }
         }
@@ -58,17 +36,17 @@ final class RenameSubKeyYamlRector implements YamlRectorInterface
 
     public function refactor(string $content): string
     {
-        $replacement = '';
+        foreach ($this->pathsToNewKeys as $path => $newKey) {
+            $pathSteps = Strings::split($path, '#[\s+]?>[\s+]?#');
+            $pathPattern = $this->createPattern($pathSteps);
 
-        $final = 2 * count($this->activePathSteps);
-        for ($i = 1; $i < $final - 1; ++$i) {
-            $replacement .= '$' . $i;
+            while (Strings::match($content, $pathPattern)) {
+                $replacement = $this->createReplacement($pathSteps, $newKey);
+                $content = Strings::replace($content, $pathPattern, $replacement, 1);
+            }
         }
 
-        $replacement .= preg_quote($this->activeNewKey);
-        $replacement .= '$' . ($i + 3);
-
-        return Strings::replace($content, $this->activePathPattern, $replacement);
+        return $content;
     }
 
     /**
@@ -82,10 +60,29 @@ final class RenameSubKeyYamlRector implements YamlRectorInterface
                 // last only up-to the key name
                 $pattern .= sprintf('(%s)(.*?)', preg_quote($pathStep));
             } else {
-                $pattern .= sprintf('(%s:\s+)(.*?)', preg_quote($pathStep));
+                // see https://regex101.com/r/n8XPbV/3/ for ([^:]*?)
+                $pattern .= sprintf('(%s:\s+)([^:]*?)', preg_quote($pathStep));
             }
         }
 
-        return '#^' . $pattern . '#s';
+        return '#^' . $pattern . '#ms';
+    }
+
+    /**
+     * @param string[] $pathSteps
+     */
+    private function createReplacement(array $pathSteps, string $newKey): string
+    {
+        $replacement = '';
+
+        $final = 2 * count($pathSteps);
+        for ($i = 1; $i < $final - 1; ++$i) {
+            $replacement .= '$' . $i;
+        }
+
+        $replacement .= preg_quote($newKey);
+        $replacement .= '$' . ($i + 3);
+
+        return $replacement;
     }
 }
